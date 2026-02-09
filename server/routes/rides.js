@@ -9,19 +9,24 @@ const router = express.Router();
 // ─── User: Request a ride ───
 router.post('/', auth, requireRole('user'), async (req, res) => {
   try {
-    const { source, destination, passengerCount } = req.body;
+    const { source, destination, passengerCount, transportType, sourceCoords, destCoords, scheduledAt, paymentMethod } = req.body;
     const user = await User.findById(req.user.id);
 
     let discount = 0;
-    if (user.rideCount === 0) discount = 10;           // first ride 10% off
-    if (passengerCount === 2) discount = Math.max(discount, 5);  // 2 passengers 5% off
+    if (user.rideCount === 0) discount = 10;
+    if (passengerCount === 2) discount = Math.max(discount, 5);
 
     const ride = await Ride.create({
       user: user._id,
       source,
       destination,
+      sourceCoords: sourceCoords || {},
+      destCoords: destCoords || {},
+      transportType: transportType || 'voiture',
       passengerCount: passengerCount || 1,
       discount,
+      scheduledAt: scheduledAt || null,
+      paymentMethod: paymentMethod || 'cash',
     });
 
     user.rideCount += 1;
@@ -37,7 +42,7 @@ router.post('/', auth, requireRole('user'), async (req, res) => {
 router.get('/my', auth, requireRole('user'), async (req, res) => {
   try {
     const rides = await Ride.find({ user: req.user.id })
-      .populate('driver', 'username mobileNumber')
+      .populate('driver', 'username mobileNumber profilePhoto')
       .populate('driverOffers.driver', 'username')
       .sort('-createdAt');
     res.json(rides);
@@ -46,13 +51,16 @@ router.get('/my', auth, requireRole('user'), async (req, res) => {
   }
 });
 
-// ─── Driver: List available rides (matching favorite areas) ───
+// ─── Driver: List available rides ───
 router.get('/available', auth, requireRole('driver'), async (req, res) => {
   try {
     const driver = await Driver.findById(req.user.id);
     const query = { status: 'pending' };
     if (driver.favoriteAreas.length > 0) {
       query.source = { $in: driver.favoriteAreas };
+    }
+    if (driver.transportTypes && driver.transportTypes.length > 0) {
+      query.transportType = { $in: driver.transportTypes };
     }
     const rides = await Ride.find(query)
       .populate('user', 'username mobileNumber')
@@ -75,17 +83,27 @@ router.get('/all-pending', auth, requireRole('driver'), async (req, res) => {
   }
 });
 
-// ─── Driver: Suggest price for a ride ───
+// ─── Driver: Suggest price ───
 router.post('/:rideId/offer', auth, requireRole('driver'), async (req, res) => {
   try {
     const { price } = req.body;
     const ride = await Ride.findById(req.params.rideId);
     if (!ride) return res.status(404).json({ message: 'Ride not found' });
 
-    // Add driver's offer
     ride.driverOffers.push({ driver: req.user.id, price });
     ride.status = 'offered';
     await ride.save();
+
+    // Emit notification if io exists
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${ride.user}`).emit('notification', {
+        type: 'ride_offer',
+        title: 'Nouvelle offre de trajet',
+        body: `Un chauffeur propose ${price} Ar`,
+        relatedId: ride._id,
+      });
+    }
 
     res.json(ride);
   } catch (err) {
@@ -105,6 +123,78 @@ router.post('/:rideId/accept', auth, requireRole('user'), async (req, res) => {
     ride.status = 'accepted';
     await ride.save();
 
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`driver_${driverId}`).emit('notification', {
+        type: 'ride_accepted',
+        title: 'Trajet accepté',
+        body: `Votre offre a été acceptée`,
+        relatedId: ride._id,
+      });
+    }
+
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── Complete ride ───
+router.put('/:rideId/complete', auth, async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.rideId);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+
+    ride.status = 'completed';
+    ride.completedAt = new Date();
+    ride.paymentStatus = 'paid';
+    await ride.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user_${ride.user}`).to(`driver_${ride.driver}`).emit('notification', {
+        type: 'ride_completed',
+        title: 'Trajet terminé',
+        body: `Le trajet de ${ride.source} à ${ride.destination} est terminé`,
+        relatedId: ride._id,
+      });
+    }
+
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── Cancel ride ───
+router.put('/:rideId/cancel', auth, async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const ride = await Ride.findById(req.params.rideId);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+
+    ride.status = 'cancelled';
+    ride.cancelledAt = new Date();
+    ride.cancelReason = reason || '';
+    await ride.save();
+
+    res.json(ride);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── Update payment ───
+router.put('/:rideId/payment', auth, async (req, res) => {
+  try {
+    const { paymentMethod, paymentStatus } = req.body;
+    const ride = await Ride.findById(req.params.rideId);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+
+    if (paymentMethod) ride.paymentMethod = paymentMethod;
+    if (paymentStatus) ride.paymentStatus = paymentStatus;
+    await ride.save();
+
     res.json(ride);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -115,8 +205,8 @@ router.post('/:rideId/accept', auth, requireRole('user'), async (req, res) => {
 router.get('/:rideId', auth, async (req, res) => {
   try {
     const ride = await Ride.findById(req.params.rideId)
-      .populate('user', 'username mobileNumber')
-      .populate('driver', 'username mobileNumber')
+      .populate('user', 'username mobileNumber profilePhoto')
+      .populate('driver', 'username mobileNumber profilePhoto')
       .populate('driverOffers.driver', 'username');
     if (!ride) return res.status(404).json({ message: 'Ride not found' });
     res.json(ride);

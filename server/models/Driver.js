@@ -1,18 +1,34 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const vehicleSchema = new mongoose.Schema({
+  transportType: { type: String, enum: ['voiture', 'taxi', 'moto', 'bateau', 'lakana'], required: true },
+  name:          { type: String, default: '' },
+  description:   { type: String, default: '' },
+  photos:        [{ type: String }],
+  capacity:      { type: Number, default: 4 },
+  pricePerKm:    { type: Number, default: null },
+  priceRange:    { type: String, default: '' },
+  available:     { type: Boolean, default: true },
+});
+
 const driverSchema = new mongoose.Schema({
-  username:      { type: String, required: true, unique: true, trim: true },
-  email:         { type: String, required: true, unique: true, trim: true, lowercase: true },
-  password:      { type: String, required: true },
-  mobileNumber:  { type: String, required: true },
-  driverLicense: { type: String, required: true },
-  nationalID:    { type: String, required: true },
-  accountStatus: { type: Boolean, default: false },  // false = pending admin approval
-  suspended:     { type: Boolean, default: false },
-  favoriteAreas: [{ type: String, trim: true }],
-  ratings:       [{ type: Number, min: 1, max: 5 }],
-  role:          { type: String, default: 'driver', enum: ['driver'] },
+  username:       { type: String, required: true, unique: true, trim: true },
+  email:          { type: String, required: true, unique: true, trim: true, lowercase: true },
+  password:       { type: String, required: true },
+  mobileNumber:   { type: String, required: true },
+  driverLicense:  { type: String, required: true },
+  nationalID:     { type: String, required: true },
+  profilePhoto:   { type: String, default: '' },
+  bio:            { type: String, default: '' },
+  language:       { type: String, enum: ['fr', 'en', 'mg'], default: 'fr' },
+  accountStatus:  { type: Boolean, default: false },
+  suspended:      { type: Boolean, default: false },
+  favoriteAreas:  [{ type: String, trim: true }],
+  transportTypes: [{ type: String, enum: ['voiture', 'taxi', 'moto', 'bateau', 'lakana'] }],
+  vehicles:       [vehicleSchema],
+  ratings:        [{ type: Number, min: 1, max: 5 }],
+  role:           { type: String, default: 'driver', enum: ['driver'] },
 }, { timestamps: true });
 
 driverSchema.pre('save', async function (next) {

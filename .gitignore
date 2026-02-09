@@ -2,3 +2,4 @@ node_modules/
 server/.env
 client/build/
 .DS_Store
+server/uploads/

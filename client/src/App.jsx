@@ -1,6 +1,9 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LanguageProvider } from './context/LanguageContext';
+import { SocketProvider } from './context/SocketContext';
+import { NotificationProvider } from './context/NotificationContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import Login from './pages/Login';
@@ -8,6 +11,14 @@ import Register from './pages/Register';
 import UserDashboard from './pages/UserDashboard';
 import DriverDashboard from './pages/DriverDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import ProfilePage from './pages/ProfilePage';
+import PublicProfilePage from './pages/PublicProfilePage';
+import SearchPage from './pages/SearchPage';
+import RideDetailPage from './pages/RideDetailPage';
+import BookingPage from './pages/BookingPage';
+import FAQPage from './pages/FAQPage';
+import SupportPage from './pages/SupportPage';
+import MessagesPage from './pages/MessagesPage';
 import './App.css';
 
 function ProtectedRoute({ children, role }) {
@@ -15,6 +26,13 @@ function ProtectedRoute({ children, role }) {
   if (loading) return <div className="loading">Loading...</div>;
   if (!user) return <Navigate to="/login" />;
   if (role && user.role !== role) return <Navigate to="/login" />;
+  return children;
+}
+
+function AuthRoute({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="loading">Loading...</div>;
+  if (!user) return <Navigate to="/login" />;
   return children;
 }
 
@@ -30,6 +48,14 @@ function AppRoutes() {
           <Routes>
             <Route path="/login" element={user ? <Navigate to={`/${user.role}`} /> : <Login />} />
             <Route path="/register" element={user ? <Navigate to={`/${user.role}`} /> : <Register />} />
+            <Route path="/faq" element={<FAQPage />} />
+            <Route path="/profile" element={<AuthRoute><ProfilePage /></AuthRoute>} />
+            <Route path="/profile/:role/:id" element={<AuthRoute><PublicProfilePage /></AuthRoute>} />
+            <Route path="/messages" element={<AuthRoute><MessagesPage /></AuthRoute>} />
+            <Route path="/ride/:id" element={<AuthRoute><RideDetailPage /></AuthRoute>} />
+            <Route path="/support" element={<AuthRoute><SupportPage /></AuthRoute>} />
+            <Route path="/search" element={<ProtectedRoute role="user"><SearchPage /></ProtectedRoute>} />
+            <Route path="/book/:driverId" element={<ProtectedRoute role="user"><BookingPage /></ProtectedRoute>} />
             <Route path="/user" element={<ProtectedRoute role="user"><UserDashboard /></ProtectedRoute>} />
             <Route path="/driver" element={<ProtectedRoute role="driver"><DriverDashboard /></ProtectedRoute>} />
             <Route path="/admin" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
@@ -45,9 +71,15 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <Router>
-        <AppRoutes />
-      </Router>
+      <LanguageProvider>
+        <SocketProvider>
+          <NotificationProvider>
+            <Router>
+              <AppRoutes />
+            </Router>
+          </NotificationProvider>
+        </SocketProvider>
+      </LanguageProvider>
     </AuthProvider>
   );
 }
